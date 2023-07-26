@@ -1,0 +1,207 @@
+---
+title: "Untitled"
+output: html_document
+date: "2023-07-19"
+---
+```{r}
+library(readxl)
+library(tidyr)
+library(dplyr)
+library(purrr)
+library(lubridate)
+library(plm)
+```
+
+```{r}
+crisis <- read_excel("20160923_global_crisis_data.xlsx",, na = "n/a")
+civilwar <- read_excel("git/financial_crias/Intra-StateWarData_v4.1.xlsx")
+ growthrates <- read_excel("git/financial_crias/growthrates.xlsx")
+ View(growthrates)
+```
+```{r}
+civilwar[sapply(civilwar, is.numeric)] <- lapply(civilwar[sapply(civilwar, is.numeric)], function(x) replace(x, x == -8, NA))
+civilwar <- data.frame(lapply(civilwar, function(x) replace(x, x == -8, NA)))
+
+
+```
+```{r}
+civilwar=filter(civilwar,StartYear1>1950)
+```
+```{r}
+civilwar <- civilwar %>%
+  select(WarName:EndYear1)
+civilwar=civilwar%>%filter((WarType==4 |WarType==5)&(SideA!="United States of America"&SideA!="france")&(WarName!="Africa's World War"))
+```
+
+
+```{r}
+colnames(growthrates)[1]="Country"
+growthrates=growthrates%>%group_by(Country)%>%pivot_longer(cols = 5:67,names_to = "year",values_to = "growth")%>%drop_na()
+colnames(growthrates)[1]="Country"
+```
+```{r}
+colnames(civilwar)[4]="Country"
+#colnames(Inter_StateWarData_v4_0)[26]="year"
+
+```
+
+```{r}
+
+# Convert start and end dates to Date objects
+civilwar<- civilwar %>%
+  mutate(StartDate = as.Date(paste(StartYear1, StartMonth1, StartDay1, sep = "-"), format = "%Y-%m-%d"),
+         EndDate = as.Date(paste(EndYear1, EndMonth1, EndDay1, sep = "-"), format = "%Y-%m-%d"))
+
+civilwar <- civilwar %>%
+  filter(!is.na(StartDate) &!is.na(EndDate))
+
+
+
+```
+```{r}
+# Extract the start and end years
+civilwar <- civilwar %>%
+  mutate(StartYear = year(StartDate),
+         EndYear = year(EndDate))
+
+# Create a new row for each year of the war for each country
+civilwar <- civilwar %>%
+  mutate(year = map2(StartYear, EndYear, seq)) %>%
+  unnest(year)
+```
+```{r}
+civilwar$war=1
+```
+
+```{r}
+growthrates$year=growthrates$year%>%as.integer()
+
+ mergeddata <- growthrates %>%
+    left_join(civilwar, by = c("Country", "year"))
+
+```
+```{r}
+# Assuming 'mergeddata' is your data frame
+mergeddata <- mergeddata %>%
+  group_by(Country) %>%
+  filter(!all(is.na(WarName)))
+```
+```{r}
+
+mergeddata <- mergeddata %>%
+  select(year,Country, growth, WarName, StartDate, EndDate, StartYear, EndYear)
+
+```
+
+
+```{r}
+
+
+# First, create a new column that indicates the year of the civil war
+#mergeddata <- mergeddata %>%
+ # arrange(Country, year) %>%
+  #group_by(Country, WarName) %>%
+  #mutate(civil_war_year = ifelse(!is.na(WarName), row_number(), NA))
+
+# Then, spread this out into separate columns for each year of the civil war
+#mergeddata <- mergeddata %>%
+ # pivot_wider(names_from = civil_war_year, values_from = civil_war_year,
+  #            names_prefix = "civil_war_year_", values_fill = 0)
+
+# Replace all non-zero values with 1
+#mergeddata[,-(1:8)] <- ifelse(mergeddata[,-(1:8)] > 0, 1, 0)
+
+```
+```{r}
+mergeddata$decgrowth=mergeddata$growth/100
+```
+```{r}
+# Identify earliest year with a war for each country
+earliest_wars <- mergeddata %>%
+  group_by(Country) %>%
+  summarise(earliest_war_year = min(year[!is.na(WarName)]), .groups = "drop")
+
+# Filter out rows where year equals earliest_war_year for each country
+mergeddata <- mergeddata %>%
+  anti_join(earliest_wars, by = c("Country" = "Country", "year" = "earliest_war_year"))
+mergeddata <- mergeddata %>%
+  arrange(Country, year) %>%
+  group_by(Country) %>%
+  mutate(war_dummy = ifelse(!is.na(WarName), 1, 0),
+         startwar = c(0, diff(war_dummy)))
+        
+```
+```{r}
+mergeddata <- mergeddata %>%
+          arrange(Country, year) %>%
+          group_by(Country) %>%
+          mutate(cumulative_growth = cumprod(ifelse(dplyr::lead(startwar,1) == 1, 1, 1 + decgrowth)))
+```
+
+```{r}
+mergeddata=mergeddata%>%filter((recovery_time==1|(after_war==1)|(during_after_war==1)))
+```
+
+
+```{r}
+pdf=pdata.frame(mergeddata,index = c("Country","year"))
+```
+
+
+
+```{r}
+
+
+# Arrange data by country and year
+df <- df %>%
+  arrange(country, year) %>%
+  group_by(country)
+
+# For Equation 2
+model1 <- lm(growth ~ lag(crisis, 0) + lag(crisis, 1) + lag(crisis, 2) + lag(crisis, 3) + lag(crisis, 4), data = df)
+
+
+
+```
+```{r}
+
+
+# Arrange data by country and year
+df <- df %>%
+  arrange(country, year) %>%
+  group_by(country)
+
+# Define a function to generate a formula for the regression model
+generate_formula <- function(max_lag) {
+  # Start with the dependent variable
+  formula <- "growth ~ "
+  
+  # Add lagged growth terms
+  formula <- paste0(formula, paste0("lag(growth, ", 1:max_lag, ")", collapse = " + "), " + ")
+  
+  # Add lagged crisis terms
+  formula <- paste0(formula, paste0("lag(crisis, ", 1:max_lag, ")", collapse = " + "), " + ")
+  
+  # Add lagged recovery terms
+  formula <- paste0(formula, paste0("lag(recovery, ", 1:max_lag, ")", collapse = " + "))
+  
+  # Return the formula as a formula object
+  as.formula(formula)
+}
+# Assume 'df' is your dataframe and it has columns for 'growth', 'crisis', and 'recovery'
+
+# Convert the dataframe to a pdata.frame for panel data analysis
+df <- pdata.frame(df, index = c("country", "year"))
+
+# Determine the maximum length of the crisis and recovery periods
+# Here, we'll assume it's the maximum value of the 'year' column, but you might need to adjust this based on your specific dataset
+max_lag <- max(df$year, na.rm = TRUE)
+
+# Generate the formula for the regression model
+formula <- generate_formula(max_lag)
+
+# Fit the regression model
+model <- plm(formula, data = df)
+
+```
+
