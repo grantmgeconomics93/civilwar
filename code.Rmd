@@ -170,13 +170,17 @@ for (country in unique(mergeddata$Country)) {
 mergeddata <- mergeddata %>%
    mutate(war = ifelse(!is.na(WarName), 1, 0))
 
- # Create 'above_one_after_war' column without the third condition
+
 mergeddata <- mergeddata %>%
   group_by(Country) %>%
-  mutate(above_one_after_war = ifelse((dplyr::lag(war, default = 0) == 1 & war == 0 & cumulative_growth > 1), 1, 0))
+  mutate(temp = ifelse(war == 0 & lag(war, default = 0) == 1, 1, NA)) %>%
+  fill(temp, .direction = "down") %>%
+  mutate(temp = ifelse(is.na(temp) | cumulative_growth >= 1.05, 0, 1),
+         above_one_after_war = ifelse(war == 0 & cumulative_growth < 1.05 & temp == 1, 1, 0)) %>%
+  select(-temp)
 
-# Print the first few rows of the dataframe to check the result
 head(mergeddata)
+
 
 
 ```
