@@ -13,9 +13,9 @@ library(plm)
 ```
 
 ```{r}
-crisis <- read_excel("20160923_global_crisis_data.xlsx",, na = "n/a")
-civilwar <- read_excel("git/financial_crias/Intra-StateWarData_v4.1.xlsx")
- growthrates <- read_excel("git/financial_crias/growthrates.xlsx")
+crisis <- read_excel("20160923_global_crisis_data.xlsx", na = "n/a")
+civilwar <- read_excel("Intra-StateWarData_v4.1.xlsx")
+ growthrates <- read_excel("growthrates.xlsx")
  View(growthrates)
 ```
 ```{r}
@@ -30,7 +30,7 @@ civilwar=filter(civilwar,StartYear1>1950)
 ```{r}
 civilwar <- civilwar %>%
   select(WarName:EndYear1)
-civilwar=civilwar%>%filter((WarType==4 |WarType==5)&(SideA!="United States of America"&SideA!="france")&(WarName!="Africa's World War"))
+civilwar=civilwar%>%filter((Intnl==0)&(SideA!="United States of America"&SideA!="france")&(WarName!="Africa's World War"))
 ```
 
 
@@ -51,7 +51,7 @@ colnames(civilwar)[4]="Country"
 civilwar<- civilwar %>%
   mutate(StartDate = as.Date(paste(StartYear1, StartMonth1, StartDay1, sep = "-"), format = "%Y-%m-%d"),
          EndDate = as.Date(paste(EndYear1, EndMonth1, EndDay1, sep = "-"), format = "%Y-%m-%d"))
-
+#filter wars without known start and end dates 
 civilwar <- civilwar %>%
   filter(!is.na(StartDate) &!is.na(EndDate))
 
@@ -69,9 +69,7 @@ civilwar <- civilwar %>%
   mutate(year = map2(StartYear, EndYear, seq)) %>%
   unnest(year)
 ```
-```{r}
-civilwar$war=1
-```
+
 
 ```{r}
 growthrates$year=growthrates$year%>%as.integer()
@@ -116,26 +114,71 @@ mergeddata <- mergeddata %>%
 mergeddata$decgrowth=mergeddata$growth/100
 ```
 ```{r}
-# Identify earliest year with a war for each country
-earliest_wars <- mergeddata %>%
+# Identify earliest year for each country
+earliest_years <- mergeddata %>%
   group_by(Country) %>%
-  summarise(earliest_war_year = min(year[!is.na(WarName)]), .groups = "drop")
+  summarise(earliest_year = min(year), .groups = "drop")
 
-# Filter out rows where year equals earliest_war_year for each country
+# Identify countries where WarName is not NA in the earliest year
+countries_to_remove <- mergeddata %>%
+  semi_join(earliest_years, by = c("Country" = "Country", "year" = "earliest_year")) %>%
+  filter(!is.na(WarName)) %>%
+  pull(Country)
+
+# Filter out these countries from the original dataset
 mergeddata <- mergeddata %>%
-  anti_join(earliest_wars, by = c("Country" = "Country", "year" = "earliest_war_year"))
-mergeddata <- mergeddata %>%
-  arrange(Country, year) %>%
-  group_by(Country) %>%
-  mutate(war_dummy = ifelse(!is.na(WarName), 1, 0),
-         startwar = c(0, diff(war_dummy)))
+  filter(!(Country %in% countries_to_remove))
+
+mergeddata<- mergeddata %>%
+     arrange(Country, year) %>%
+     group_by(Country) %>%
+    mutate(startwar = ifelse(is.na(dplyr::lag(WarName,1)) & !is.na(WarName), 1, 0))
+
         
 ```
 ```{r}
+# Initialize an empty vector to store the cumulative growth
+mergeddata$cumulative_growth <- NA
+
+# Loop over each country
+for (country in unique(mergeddata$Country)) {
+  # Get the rows for this country
+  rows <- which(mergeddata$Country == country)
+  
+  # Initialize the cumulative growth at 1
+  cumulative_growth <- 1
+  
+  # Loop over each row for this country
+  for (i in rows) {
+    # If a war starts in the next year, reset the cumulative growth to 1
+    if (i < max(rows) && !is.na(mergeddata$WarName[i + 1]) && is.na(mergeddata$WarName[i])) {
+      cumulative_growth <- 1
+    } else {
+      # Otherwise, update the cumulative growth
+      cumulative_growth <- cumulative_growth * (1 + mergeddata$decgrowth[i])
+    }
+    
+    # Store the cumulative growth
+    mergeddata$cumulative_growth[i] <- cumulative_growth
+  }
+}
+
+
+
+```
+```{r}
 mergeddata <- mergeddata %>%
-          arrange(Country, year) %>%
-          group_by(Country) %>%
-          mutate(cumulative_growth = cumprod(ifelse(dplyr::lead(startwar,1) == 1, 1, 1 + decgrowth)))
+   mutate(war = ifelse(!is.na(WarName), 1, 0))
+
+ # Create 'above_one_after_war' column without the third condition
+mergeddata <- mergeddata %>%
+  group_by(Country) %>%
+  mutate(above_one_after_war = ifelse((dplyr::lag(war, default = 0) == 1 & war == 0 & cumulative_growth > 1), 1, 0))
+
+# Print the first few rows of the dataframe to check the result
+head(mergeddata)
+
+
 ```
 
 ```{r}
