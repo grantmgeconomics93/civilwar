@@ -10,6 +10,9 @@ library(dplyr)
 library(purrr)
 library(lubridate)
 library(plm)
+library(ggplot2)
+library(vars)
+library (lpirfs)
 ```
 
 ```{r}
@@ -18,6 +21,10 @@ civilwar <- read_excel("Intra-StateWarData_v4.1.xlsx")
  growthrates <- read_excel("growthrates.xlsx")
  View(growthrates)
 ```
+```{r}
+options(scipen=999)
+```
+
 ```{r}
 civilwar[sapply(civilwar, is.numeric)] <- lapply(civilwar[sapply(civilwar, is.numeric)], function(x) replace(x, x == -8, NA))
 civilwar <- data.frame(lapply(civilwar, function(x) replace(x, x == -8, NA)))
@@ -29,10 +36,23 @@ civilwar=filter(civilwar,StartYear1>1950)
 ```
 ```{r}
 civilwar <- civilwar %>%
-  select(WarName:EndYear1)
-civilwar=civilwar%>%filter((Intnl==0)&(SideA!="United States of America"&SideA!="france")&(WarName!="Africa's World War"))
+  dplyr::select(WarName:EndYear1)%>%filter((Intnl==0)&(SideA!="United States of America"&SideA!="france"))
 ```
 
+```{r}
+civilwar = civilwar %>%
+  mutate(WarName = ifelse(is.na(WarName), 0, WarName))
+
+
+civilwar <-filter(civilwar, WarName != "First Philippine-Moro")
+
+```
+```{r}
+
+civilwar = civilwar %>%
+  mutate(WarName = ifelse(WarName == "Second Nepal Maoists", "First Nepal Maoist Insurgency", WarName))
+
+```
 
 ```{r}
 colnames(growthrates)[1]="Country"
@@ -59,6 +79,38 @@ civilwar <- civilwar %>%
 
 ```
 ```{r}
+
+# Split data
+nepal_war <- civilwar %>% 
+  filter(WarName == "First Nepal Maoist Insurgency")
+
+other_wars <- civilwar %>% 
+  filter(WarName != "First Nepal Maoist Insurgency")
+
+# Process the Nepal war data
+nepal_war_summary <- nepal_war %>%
+  summarise(
+    WarName = first(WarName),
+    WarType = first(WarType),
+    CcodeA = first(CcodeA),
+    Country = first(Country),
+    CcodeB = first(CcodeB),
+    SideB = first(SideB),
+    Intnl = first(Intnl),
+    StartDate = min(StartDate),
+    EndDate = max(EndDate),
+    StartMonth1 = month(min(StartDate)),
+    StartDay1 = day(min(StartDate)),
+    StartYear1 = year(min(StartDate)),
+    EndMonth1 = month(max(EndDate)),
+    EndDay1 = day(max(EndDate)),
+    EndYear1 = year(max(EndDate))
+  )
+# Merge back into the original data
+civilwar <- bind_rows(other_wars, nepal_war_summary)
+```
+
+```{r}
 # Extract the start and end years
 civilwar <- civilwar %>%
   mutate(StartYear = year(StartDate),
@@ -78,6 +130,13 @@ growthrates$year=growthrates$year%>%as.integer()
     left_join(civilwar, by = c("Country", "year"))
 
 ```
+
+```{r}
+
+mergeddata = mergeddata %>%
+  mutate(WarName = ifelse(WarName == "Second Nepal Maoists", "First Nepal Maoist Insurgency", WarName))
+
+```
 ```{r}
 # Assuming 'mergeddata' is your data frame
 mergeddata <- mergeddata %>%
@@ -87,7 +146,7 @@ mergeddata <- mergeddata %>%
 ```{r}
 
 mergeddata <- mergeddata %>%
-  select(year,Country, growth, WarName, StartDate, EndDate, StartYear, EndYear)
+  dplyr::select(year,Country, growth, WarName, StartDate, EndDate, StartYear, EndYear)
 
 ```
 
@@ -150,48 +209,110 @@ for (country in unique(mergeddata$Country)) {
   
   # Loop over each row for this country
   for (i in rows) {
-    # If a war starts in the next year, reset the cumulative growth to 1
-    if (i < max(rows) && !is.na(mergeddata$WarName[i + 1]) && is.na(mergeddata$WarName[i])) {
-      cumulative_growth <- 1
-    } else {
-      # Otherwise, update the cumulative growth
-      cumulative_growth <- cumulative_growth * (1 + mergeddata$decgrowth[i])
-    }
+    # Update the cumulative growth, regardless of whether a war starts or not
+    cumulative_growth <- cumulative_growth * (1 + mergeddata$decgrowth[i])
     
     # Store the cumulative growth
     mergeddata$cumulative_growth[i] <- cumulative_growth
-  }
+  }  
 }
 
 
 
+
 ```
 ```{r}
+#make a dummy for war
 mergeddata <- mergeddata %>%
    mutate(war = ifelse(!is.na(WarName), 1, 0))
+
+#make a recovery dummy that is 1 until the year output is 110% of prewar output 
+
+# Make a recovery dummy that is 1 until the year output is 125% of prewar output 
+mergeddata <- mergeddata %>%
+  group_by(Country) %>%
+  mutate(pre_war_cumulative_growth = ifelse(war == 0 & dplyr::lag(war, default = 0) == 1, dplyr::lag(cumulative_growth), NA)) %>%
+  fill(pre_war_cumulative_growth, .direction = "down") %>%
+  mutate(temp = ifelse(is.na(pre_war_cumulative_growth) | cumulative_growth >= pre_war_cumulative_growth * 1.25, 0, 1),
+         above_one_after_war = ifelse(war == 0 & cumulative_growth < pre_war_cumulative_growth * 1.25 & temp == 1, 1, 0)) %>%
+  dplyr::select(-temp)
+
+
+
+
+```
+```{r}
+mergeddata$prewwar=ifelse(dplyr::lead(mergeddata$startwar,1)==1& mergeddata$startwar==0,1,0)
+```
+
+```{r}
+#remove unnecessary data only war a
+mergeddata=mergeddata%>%filter((prewwar==1)|(war==1)|(above_one_after_war==1))
+```
+```{r}
 
 
 mergeddata <- mergeddata %>%
   group_by(Country) %>%
-  mutate(temp = ifelse(war == 0 & lag(war, default = 0) == 1, 1, NA)) %>%
-  fill(temp, .direction = "down") %>%
-  mutate(temp = ifelse(is.na(temp) | cumulative_growth >= 1.05, 0, 1),
-         above_one_after_war = ifelse(war == 0 & cumulative_growth < 1.05 & temp == 1, 1, 0)) %>%
-  select(-temp)
+  mutate(year_since_start = ifelse(war == 1, 0, cumsum(war == 0)))
 
-head(mergeddata)
-
+ggplot(mergeddata, aes(x = year_since_start, y = decgrowth, color = Country)) +
+  geom_line() +
+  labs(x = "Years Since Start of War", y = "Decadal Growth") +
+  theme_minimal() 
+ggplot(mergeddata, aes(x = year_since_start, y = decgrowth, color = Country)) +
+  geom_line() +
+  labs(x = "Years Since Start of War", y = "Decadal Growth") +
+  theme_minimal() +
+  facet_wrap(~Country)
 
 
 ```
-
 ```{r}
-mergeddata=mergeddata%>%filter((recovery_time==1|(after_war==1)|(during_after_war==1)))
+# Create lagged variables
+mergeddata <- mergeddata %>%
+  group_by(Country) %>%
+  mutate(across(c(growth, war, above_one_after_war, prewwar, year_since_start), 
+                list(lag1 = ~lag(., 1),
+                     lag2 = ~lag(., 2),
+                     lag3 = ~lag(., 3),
+                     lag4 = ~lag(., 4))))
+# Drop the first 4 rows for each country to avoid NA values due to lags
+mergeddata <- mergeddata %>%
+  group_by(Country) %>%
+  slice(-(1:4))
 ```
+
+
 
 
 ```{r}
 pdf=pdata.frame(mergeddata,index = c("Country","year"))
+```
+```{r}
+# Finish the formula
+formula <- as.formula("growth ~ growth_lag1 + growth_lag2 + growth_lag3 + growth_lag4 + 
+                      war_lag1 + war_lag2 + war_lag3 + war_lag4 + 
+                      above_one_after_war_lag1 + above_one_after_war_lag2 + above_one_after_war_lag3 + above_one_after_war_lag4 + 
+                      prewwar_lag1 + prewwar_lag2 + prewwar_lag3 + prewwar_lag4 + 
+                      year_since_start_lag1 + year_since_start_lag2 + year_since_start_lag3 + year_since_start_lag4")
+
+# Estimate the model
+model <- plm(formula, data = pdf, model = "within")
+
+
+
+
+```
+```{r}
+
+
+
+# Plot the IRFs
+plot(irfs)
+irf(model, impulse = "income", response = "cons",
+             n.ahead = 8, ortho = FALSE, runs = 1000)
+
 ```
 
 
