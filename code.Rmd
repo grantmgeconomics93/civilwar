@@ -18,7 +18,7 @@ library (lpirfs)
 ```{r}
 crisis <- read_excel("20160923_global_crisis_data.xlsx", na = "n/a")
 civilwar <- read_excel("Intra-StateWarData_v4.1.xlsx")
- growthrates <- read_excel("growthrates.xlsx")
+ growthrates <-read_excel("growthrates.xlsx")
  View(growthrates)
 ```
 ```{r}
@@ -35,11 +35,13 @@ civilwar <- data.frame(lapply(civilwar, function(x) replace(x, x == -8, NA)))
 civilwar=filter(civilwar,StartYear1>1950)
 ```
 ```{r}
+# get civil war information information I want 
 civilwar <- civilwar %>%
   dplyr::select(WarName:EndYear1)%>%filter((Intnl==0)&(SideA!="United States of America"&SideA!="france"))
 ```
 
 ```{r}
+# get rid of  "First Philippine-Moro" war the Philippines were in two wars at the same time I got rid of the smaller one 
 civilwar = civilwar %>%
   mutate(WarName = ifelse(is.na(WarName), 0, WarName))
 
@@ -55,6 +57,7 @@ civilwar = civilwar %>%
 ```
 
 ```{r}
+#get ready to merge 
 colnames(growthrates)[1]="Country"
 growthrates=growthrates%>%group_by(Country)%>%pivot_longer(cols = 5:67,names_to = "year",values_to = "growth")%>%drop_na()
 colnames(growthrates)[1]="Country"
@@ -79,7 +82,7 @@ civilwar <- civilwar %>%
 
 ```
 ```{r}
-
+#treat the two civil wars as the same 
 # Split data
 nepal_war <- civilwar %>% 
   filter(WarName == "First Nepal Maoist Insurgency")
@@ -124,6 +127,7 @@ civilwar <- civilwar %>%
 
 
 ```{r}
+# merge two DFs
 growthrates$year=growthrates$year%>%as.integer()
 
  mergeddata <- growthrates %>%
@@ -132,7 +136,7 @@ growthrates$year=growthrates$year%>%as.integer()
 ```
 
 ```{r}
-
+# Nepal had two civil war one ended months before the second I decided to treat them as the same war 
 mergeddata = mergeddata %>%
   mutate(WarName = ifelse(WarName == "Second Nepal Maoists", "First Nepal Maoist Insurgency", WarName))
 
@@ -144,7 +148,7 @@ mergeddata <- mergeddata %>%
   filter(!all(is.na(WarName)))
 ```
 ```{r}
-
+#get needed rows
 mergeddata <- mergeddata %>%
   dplyr::select(year,Country, growth, WarName, StartDate, EndDate, StartYear, EndYear)
 
@@ -246,7 +250,7 @@ mergeddata$prewwar=ifelse(dplyr::lead(mergeddata$startwar,1)==1& mergeddata$star
 ```
 
 ```{r}
-#remove unnecessary data only war a
+#remove unnecessary data only war 
 mergeddata=mergeddata%>%filter((prewwar==1)|(war==1)|(above_one_after_war==1))
 ```
 ```{r}
@@ -255,11 +259,12 @@ mergeddata=mergeddata%>%filter((prewwar==1)|(war==1)|(above_one_after_war==1))
 mergeddata <- mergeddata %>%
   group_by(Country) %>%
   mutate(year_since_start = ifelse(war == 1, 0, cumsum(war == 0)))
-
+#plot the recovery one plot 
 ggplot(mergeddata, aes(x = year_since_start, y = decgrowth, color = Country)) +
   geom_line() +
   labs(x = "Years Since Start of War", y = "Decadal Growth") +
   theme_minimal() 
+#plot the recovery one plot by country 
 ggplot(mergeddata, aes(x = year_since_start, y = decgrowth, color = Country)) +
   geom_line() +
   labs(x = "Years Since Start of War", y = "Decadal Growth") +
@@ -290,15 +295,34 @@ mergeddata <- mergeddata %>%
 pdf=pdata.frame(mergeddata,index = c("Country","year"))
 ```
 ```{r}
+pdf <- pdf[order(pdf$Country, pdf$year), ]
+```
+
+```{r}
 # Finish the formula
-formula <- as.formula("growth ~ growth_lag1 + growth_lag2 + growth_lag3 + growth_lag4 + 
-                      war_lag1 + war_lag2 + war_lag3 + war_lag4 + 
-                      above_one_after_war_lag1 + above_one_after_war_lag2 + above_one_after_war_lag3 + above_one_after_war_lag4 + 
-                      prewwar_lag1 + prewwar_lag2 + prewwar_lag3 + prewwar_lag4 + 
-                      year_since_start_lag1 + year_since_start_lag2 + year_since_start_lag3 + year_since_start_lag4")
+#formula <- as.formula()
 
 # Estimate the model
-model <- plm(formula, data = pdf, model = "within")
+#model <- plm(formula, data = pdf, model = "within",index = c("country","year"))
+
+
+
+
+```
+```{r}
+irf_result <- lp_lin_panel(data_set = pdf,data_sample ="Full",shock = "startwar",endog_data = "cumulative_growth" ,confint = 1.96 ,hor = 7,lags_exog_data = 4)
+plot(irf_result)
+
+```
+```{r}
+
+```
+
+
+```{r}
+
+irf_result2 <- lp_lin_panel(data_set = pdf,data_sample ="Full",shock = "war",endog_data = "cumulative_growth",confint = 1.96 ,hor = 7,lags_exog_data = 4)
+plot(irf_result2)
 
 
 
@@ -306,70 +330,7 @@ model <- plm(formula, data = pdf, model = "within")
 ```
 ```{r}
 
-
-
-# Plot the IRFs
-plot(irfs)
-irf(model, impulse = "income", response = "cons",
-             n.ahead = 8, ortho = FALSE, runs = 1000)
-
-```
-
-
-
-```{r}
-
-
-# Arrange data by country and year
-df <- df %>%
-  arrange(country, year) %>%
-  group_by(country)
-
-# For Equation 2
-model1 <- lm(growth ~ lag(crisis, 0) + lag(crisis, 1) + lag(crisis, 2) + lag(crisis, 3) + lag(crisis, 4), data = df)
-
-
-
-```
-```{r}
-
-
-# Arrange data by country and year
-df <- df %>%
-  arrange(country, year) %>%
-  group_by(country)
-
-# Define a function to generate a formula for the regression model
-generate_formula <- function(max_lag) {
-  # Start with the dependent variable
-  formula <- "growth ~ "
-  
-  # Add lagged growth terms
-  formula <- paste0(formula, paste0("lag(growth, ", 1:max_lag, ")", collapse = " + "), " + ")
-  
-  # Add lagged crisis terms
-  formula <- paste0(formula, paste0("lag(crisis, ", 1:max_lag, ")", collapse = " + "), " + ")
-  
-  # Add lagged recovery terms
-  formula <- paste0(formula, paste0("lag(recovery, ", 1:max_lag, ")", collapse = " + "))
-  
-  # Return the formula as a formula object
-  as.formula(formula)
-}
-# Assume 'df' is your dataframe and it has columns for 'growth', 'crisis', and 'recovery'
-
-# Convert the dataframe to a pdata.frame for panel data analysis
-df <- pdata.frame(df, index = c("country", "year"))
-
-# Determine the maximum length of the crisis and recovery periods
-# Here, we'll assume it's the maximum value of the 'year' column, but you might need to adjust this based on your specific dataset
-max_lag <- max(df$year, na.rm = TRUE)
-
-# Generate the formula for the regression model
-formula <- generate_formula(max_lag)
-
-# Fit the regression model
-model <- plm(formula, data = df)
-
+irf_result3 <- lp_lin_panel(data_set = pdf,data_sample ="Full",shock = "above_one_after_war",endog_data= "cumulative_growth",confint = 1.96 ,hor = 7,lags_exog_data = 4)
+plot(irf_result3)
 ```
 
