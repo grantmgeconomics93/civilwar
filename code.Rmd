@@ -50,7 +50,7 @@ civilwar <-filter(civilwar, WarName != "First Philippine-Moro")
 
 ```
 ```{r}
-
+#combine the two Nepali civil wars due to their closeness in time 
 civilwar = civilwar %>%
   mutate(WarName = ifelse(WarName == "Second Nepal Maoists", "First Nepal Maoist Insurgency", WarName))
 
@@ -154,25 +154,6 @@ mergeddata <- mergeddata %>%
 
 ```
 
-
-```{r}
-
-
-# First, create a new column that indicates the year of the civil war
-#mergeddata <- mergeddata %>%
- # arrange(Country, year) %>%
-  #group_by(Country, WarName) %>%
-  #mutate(civil_war_year = ifelse(!is.na(WarName), row_number(), NA))
-
-# Then, spread this out into separate columns for each year of the civil war
-#mergeddata <- mergeddata %>%
- # pivot_wider(names_from = civil_war_year, values_from = civil_war_year,
-  #            names_prefix = "civil_war_year_", values_fill = 0)
-
-# Replace all non-zero values with 1
-#mergeddata[,-(1:8)] <- ifelse(mergeddata[,-(1:8)] > 0, 1, 0)
-
-```
 ```{r}
 mergeddata$decgrowth=mergeddata$growth/100
 ```
@@ -230,16 +211,18 @@ for (country in unique(mergeddata$Country)) {
 mergeddata <- mergeddata %>%
    mutate(war = ifelse(!is.na(WarName), 1, 0))
 
-#make a recovery dummy that is 1 until the year output is 110% of prewar output 
+# Identify the pre-war year
+mergeddata$prewwar = ifelse(dplyr::lead(mergeddata$startwar, 1) == 1 & mergeddata$startwar == 0, 1, 0)
 
-# Make a recovery dummy that is 1 until the year output is 125% of prewar output 
+# Group by country and apply the changes
 mergeddata <- mergeddata %>%
   group_by(Country) %>%
-  mutate(pre_war_cumulative_growth = ifelse(war == 0 & dplyr::lag(war, default = 0) == 1, dplyr::lag(cumulative_growth), NA)) %>%
+  mutate(pre_war_cumulative_growth = ifelse(prewwar == 1, cumulative_growth, NA)) %>%
   fill(pre_war_cumulative_growth, .direction = "down") %>%
   mutate(temp = ifelse(is.na(pre_war_cumulative_growth) | cumulative_growth >= pre_war_cumulative_growth * 1.25, 0, 1),
          above_one_after_war = ifelse(war == 0 & cumulative_growth < pre_war_cumulative_growth * 1.25 & temp == 1, 1, 0)) %>%
   dplyr::select(-temp)
+
 
 
 
@@ -298,17 +281,6 @@ pdf=pdata.frame(mergeddata,index = c("Country","year"))
 pdf <- pdf[order(pdf$Country, pdf$year), ]
 ```
 
-```{r}
-# Finish the formula
-#formula <- as.formula()
-
-# Estimate the model
-#model <- plm(formula, data = pdf, model = "within",index = c("country","year"))
-
-
-
-
-```
 ```{r}
 irf_result <- lp_lin_panel(data_set = pdf,data_sample ="Full",shock = "startwar",endog_data = "cumulative_growth" ,confint = 1.96 ,hor = 7,lags_exog_data = 4)
 plot(irf_result)
